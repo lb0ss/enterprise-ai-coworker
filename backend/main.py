@@ -89,24 +89,32 @@ async def upload(file: UploadFile = File(...)):
     return {"filename": file.filename, "chunks_indexed": len(chunks)}
 
 
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
 class ChatRequest(BaseModel):
     question: str
+    history: list[ChatMessage] = []
     n_results: int = 5
 
 
-def stream_answer(question: str, context_chunks: list[str]) -> Generator:
+def stream_answer(question: str, context_chunks: list[str], history: list[ChatMessage]) -> Generator:
     context = "\n\n".join(context_chunks)
-    prompt = f"""Use the following context to answer the question.
+    system_prompt = f"""You are a helpful assistant that answers questions based on the provided document context.
 If the answer is not in the context, say you don't know.
 
 Context:
-{context}
+{context}"""
 
-Question: {question}
-"""
+    messages = [{"role": "system", "content": system_prompt}]
+    messages += [{"role": m.role, "content": m.content} for m in history]
+    messages.append({"role": "user", "content": question})
+
     stream = openai_client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
+        messages=messages,
         stream=True,
     )
     for chunk in stream:
@@ -131,6 +139,6 @@ def chat(request: ChatRequest):
     context_chunks = results["documents"][0]
 
     return StreamingResponse(
-        stream_answer(request.question, context_chunks),
+        stream_answer(request.question, context_chunks, request.history),
         media_type="text/event-stream",
     )

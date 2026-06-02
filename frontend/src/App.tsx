@@ -80,10 +80,14 @@ export default function App() {
     setStreaming(true)
 
     try {
+      const history = messages
+        .filter(m => !m.streaming)
+        .map(m => ({ role: m.role, content: m.content }))
+
       const response = await fetch(`${API}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: userMsg.content }),
+        body: JSON.stringify({ question: userMsg.content, history }),
       })
 
       const reader = response.body!.getReader() // gets the readable stream from the fetch response
