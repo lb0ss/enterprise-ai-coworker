@@ -1,31 +1,22 @@
-# Deprecated — NOT USED IN PRODUCTION, SEE mcp_server.py instead
-#
-# This file shows how tools were defined using LangChain's @tool decorator
-# before being migrated to the MCP protocol in mcp_server.py.
-#
-# In the original approach, tools were imported directly into agent.py and
-# passed to create_react_agent(). The agent called them as in-process Python
-# functions with no protocol layer in between.
-#
-# In the current approach (mcp_server.py), the same tools are exposed via the
-# MCP protocol over stdio, allowing any MCP-compatible client to use them —
-# not just this agent.
-
 import os
 
 import chromadb
-from langchain_core.tools import tool
+from dotenv import load_dotenv
+from mcp.server.fastmcp import FastMCP
 from openai import OpenAI
+
+load_dotenv()
 
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 collection = chroma_client.get_or_create_collection(name="documents")
 
-# Sandboxed directory the agent is allowed to read from
 WORKSPACE_DIR = os.path.join(os.path.dirname(__file__), "workspace")
 
+mcp = FastMCP("DocMind Tools")
 
-@tool
+
+@mcp.tool()
 def search_documents(query: str) -> str:
     """Search the indexed documents for content relevant to the query."""
     response = openai_client.embeddings.create(
@@ -46,7 +37,7 @@ def search_documents(query: str) -> str:
     return "\n\n".join(chunks)
 
 
-@tool
+@mcp.tool()
 def read_file(filename: str) -> str:
     """Read a file from the workspace directory. Only files inside the workspace are accessible."""
     safe_path = os.path.realpath(os.path.join(WORKSPACE_DIR, filename))
@@ -62,4 +53,5 @@ def read_file(filename: str) -> str:
         return f.read()
 
 
-TOOLS = [search_documents, read_file]
+if __name__ == "__main__":
+    mcp.run()

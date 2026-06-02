@@ -15,7 +15,7 @@ from openai import OpenAI
 
 load_dotenv()
 
-from agent import agent
+from agent import get_agent
 
 app = FastAPI(title="Enterprise AI Coworker")
 
@@ -154,6 +154,9 @@ class AgentRequest(BaseModel):
 
 async def stream_agent_events(task: str) -> AsyncGenerator:
     inputs = {"messages": [{"role": "user", "content": task}]}
+
+    # MCP client lifecycle is tied to the request — connects to mcp_server.py via stdio
+    agent = await get_agent()
 
     # astream_events streams every internal ReAct loop event as it happens
     async for event in agent.astream_events(inputs, version="v2"):
