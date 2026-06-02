@@ -1,17 +1,21 @@
+import json
 import os
 import uuid
-from typing import Generator
+from typing import AsyncGenerator, Generator
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from langchain_core.messages import AIMessage, ToolMessage
 from pydantic import BaseModel
 
 import chromadb
 from openai import OpenAI
 
 load_dotenv()
+
+from agent import agent
 
 app = FastAPI(title="Enterprise AI Coworker")
 
@@ -140,5 +144,41 @@ def chat(request: ChatRequest):
 
     return StreamingResponse(
         stream_answer(request.question, context_chunks, request.history),
+        media_type="text/event-stream",
+    )
+
+
+class AgentRequest(BaseModel):
+    task: str
+
+
+async def stream_agent_events(task: str) -> AsyncGenerator:
+    inputs = {"messages": [{"role": "user", "content": task}]}
+
+    # astream_events streams every internal ReAct loop event as it happens
+    async for event in agent.astream_events(inputs, version="v2"):
+        kind = event["event"]
+
+        if kind == "on_chat_model_stream":
+            token = event["data"]["chunk"].content
+            if token:
+                yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+        elif kind == "on_tool_start":
+            yield f"data: {json.dumps({'type': 'tool_call', 'tool': event['name'], 'input': str(event['data'].get('input', ''))})}\n\n"
+
+        elif kind == "on_tool_end":
+            yield f"data: {json.dumps({'type': 'tool_result', 'tool': event['name'], 'content': str(event['data'].get('output', ''))[:300]})}\n\n"
+
+    yield "data: [DONE]\n\n"
+
+
+@app.post("/agent")
+async def run_agent(request: AgentRequest):
+    if not request.task.strip():
+        raise HTTPException(status_code=400, detail="Task cannot be empty")
+
+    return StreamingResponse(
+        stream_agent_events(request.task),
         media_type="text/event-stream",
     )
