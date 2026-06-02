@@ -24,11 +24,26 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [question, setQuestion] = useState('')
   const [streaming, setStreaming] = useState(false)
+  const [backendUp, setBackendUp] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const res = await fetch(`${API}/health`)
+        setBackendUp(res.ok)
+      } catch {
+        setBackendUp(false)
+      }
+    }
+    check()
+    const interval = setInterval(check, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0]
@@ -109,9 +124,8 @@ export default function App() {
 
       {/* Header */}
       <header className="shrink-0 border-b border-border px-6 h-12 flex items-center gap-3">
-        <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-        <span className="text-sm font-medium tracking-wide">Enterprise AI Coworker</span>
-        <span className="text-xs text-muted-foreground ml-auto">Phase 1 · RAG</span>
+        <div className={`w-1.5 h-1.5 rounded-full ${backendUp ? 'bg-green-500' : 'bg-red-500'}`} title={backendUp ? 'Backend online' : 'Backend offline'} />
+        <span className="text-sm font-medium tracking-wide">DocMind</span>
       </header>
 
       {/* Body */}
