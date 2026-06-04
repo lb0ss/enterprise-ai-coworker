@@ -17,6 +17,7 @@ from openai import OpenAI
 load_dotenv()
 
 from agent import get_agent
+from cache import get_cached_answer, set_cached_answer
 
 app = FastAPI(title="Enterprise AI Coworker")
 
@@ -155,16 +156,32 @@ def chat(request: ChatRequest):
     # embed_texts returns a list of vectors (one per input); [0] unwraps the single question vector
     question_vector = embed_texts([request.question])[0]
 
+    # check Redis for a semantically similar cached answer before calling OpenAI
+    cached = get_cached_answer(question_vector)
+    if cached:
+        def stream_cached():
+            yield f"data: {cached}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(stream_cached(), media_type="text/event-stream")
+
     results = collection.query(
         query_embeddings=[question_vector],
         n_results=min(request.n_results, collection.count()),
     )
     context_chunks = results["documents"][0]
 
-    return StreamingResponse(
-        stream_answer(request.question, context_chunks, request.history),
-        media_type="text/event-stream",
-    )
+    def stream_and_cache():
+        full_answer = []
+        for chunk in stream_answer(request.question, context_chunks, request.history):
+            if chunk != "data: [DONE]\n\n":
+                # strip "data: " prefix and trailing "\n\n" to get the raw token
+                token = chunk[6:].rstrip("\n")
+                full_answer.append(token)
+            yield chunk
+        # store the complete answer in Redis after streaming finishes
+        set_cached_answer(question_vector, "".join(full_answer))
+
+    return StreamingResponse(stream_and_cache(), media_type="text/event-stream")
 
 
 class AgentRequest(BaseModel):
