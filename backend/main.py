@@ -8,6 +8,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, ToolMessage
+from langsmith import traceable
 from pydantic import BaseModel
 
 import chromadb
@@ -64,6 +65,23 @@ def debug_chunks():
     return collection.get()
 
 
+@app.get("/documents")
+def get_documents():
+    results = collection.get(include=["metadatas"])
+    metadatas = results.get("metadatas", [])
+
+    # aggregate chunk counts per filename
+    counts: dict[str, int] = {}
+    for m in metadatas:
+        filename = m.get("filename", "unknown")
+        counts[filename] = counts.get(filename, 0) + 1
+
+    return {
+        "documents": [{"filename": f, "chunks_indexed": c} for f, c in counts.items()],
+        "total_chunks": len(metadatas),
+    }
+
+
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
     if not file.filename.endswith((".txt", ".md", ".py", ".pdf")):
@@ -104,6 +122,7 @@ class ChatRequest(BaseModel):
     n_results: int = 5
 
 
+@traceable(name="chat", run_type="chain")
 def stream_answer(question: str, context_chunks: list[str], history: list[ChatMessage]) -> Generator:
     context = "\n\n".join(context_chunks)
     system_prompt = f"""You are a helpful assistant that answers questions based on the provided document context.

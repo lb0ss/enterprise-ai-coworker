@@ -18,6 +18,11 @@ interface UploadResult {
     chunks_indexed: number
 }
 
+interface DocumentsResponse {
+    documents: UploadResult[]
+    total_chunks: number
+}
+
 interface AgentStep {
     id: string
     type: 'tool_call' | 'tool_result' | 'token'
@@ -39,6 +44,7 @@ export default function App() {
 
     // shared
     const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
+    const [indexedDocuments, setIndexedDocuments] = useState<UploadResult[]>([])
     const [uploading, setUploading] = useState(false)
     const [uploadError, setUploadError] = useState<string | null>(null)
     const [backendUp, setBackendUp] = useState(false)
@@ -77,6 +83,22 @@ export default function App() {
         return () => clearInterval(interval)
     }, [])
 
+    useEffect(() => {
+        const loadDocuments = async () => {
+            try {
+                const { data } = await axios.get<DocumentsResponse>(`${API}/documents`)
+                if (data.documents.length > 0) {
+                    setIndexedDocuments(data.documents)
+                    // set uploadResult so chat input is enabled
+                    setUploadResult(data.documents[data.documents.length - 1])
+                }
+            } catch {
+                // silently fail — no documents indexed yet
+            }
+        }
+        loadDocuments()
+    }, [])
+
     const onDrop = useCallback(async (acceptedFiles: File[]) => {
         const file = acceptedFiles[0]
         if (!file) return
@@ -87,6 +109,10 @@ export default function App() {
         try {
             const { data } = await axios.post<UploadResult>(`${API}/upload`, formData)
             setUploadResult(data)
+            setIndexedDocuments((prev) => {
+                const exists = prev.find((d) => d.filename === data.filename)
+                return exists ? prev : [...prev, data]
+            })
         } catch (err: any) {
             setUploadError(err.response?.data?.detail ?? 'Upload failed')
         } finally {
@@ -354,17 +380,19 @@ export default function App() {
                         )}
                     </div>
 
-                    {uploadResult && (
-                        <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5">
-                            <div className="flex items-center gap-2">
-                                <div className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                                <span className="text-xs font-medium truncate">
-                                    {uploadResult.filename}
-                                </span>
-                            </div>
-                            <p className="text-xs text-muted-foreground pl-3.5">
-                                {uploadResult.chunks_indexed} chunks indexed
-                            </p>
+                    {indexedDocuments.length > 0 && (
+                        <div className="space-y-1.5">
+                            {indexedDocuments.map((doc) => (
+                                <div key={doc.filename} className="rounded-lg border border-border bg-muted/20 p-3 space-y-1">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                                        <span className="text-xs font-medium truncate">{doc.filename}</span>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground pl-3.5">
+                                        {doc.chunks_indexed} chunks indexed
+                                    </p>
+                                </div>
+                            ))}
                         </div>
                     )}
 
