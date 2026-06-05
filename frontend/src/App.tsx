@@ -11,6 +11,7 @@ interface Message {
     role: 'user' | 'assistant'
     content: string
     streaming?: boolean
+    queryId?: number  // set when [QUERY_ID:N] arrives; enables feedback buttons
 }
 
 interface UploadResult {
@@ -39,8 +40,25 @@ interface AgentRun {
     running: boolean
 }
 
+interface AnalyticsData {
+    total_queries: number
+    cache_hits: number
+    cache_miss_rate: number
+    avg_latency_ms: number
+    total_tokens: number
+    thumbs_up: number
+    thumbs_down: number
+    recent_queries: {
+        question: string
+        latency_ms: number
+        token_count: number
+        cache_hit: number
+        created_at: string
+    }[]
+}
+
 export default function App() {
-    const [tab, setTab] = useState<'chat' | 'agent'>('chat')
+    const [tab, setTab] = useState<'chat' | 'agent' | 'analytics'>('chat')
 
     // shared
     const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
@@ -54,6 +72,13 @@ export default function App() {
     const [question, setQuestion] = useState('')
     const [streaming, setStreaming] = useState(false)
     const [lastQueryId, setLastQueryId] = useState<number | null>(null)
+    // tracks which query_ids have been rated so we don't show buttons after voting
+    const [feedbackGiven, setFeedbackGiven] = useState<Set<number>>(new Set())
+
+    // analytics tab
+    const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
+    const [analyticsLoading, setAnalyticsLoading] = useState(false)
+
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
     // agent tab
@@ -168,6 +193,12 @@ export default function App() {
                     if (data.startsWith('[QUERY_ID:')) {
                         const id = parseInt(data.slice(10, -1))
                         setLastQueryId(id)
+                        // stamp queryId onto the assistant message so feedback buttons appear
+                        setMessages((prev) =>
+                            prev.map((m) =>
+                                m.id === assistantMsg.id ? { ...m, queryId: id } : m
+                            )
+                        )
                         continue
                     }
                     setMessages((prev) =>
@@ -293,6 +324,32 @@ export default function App() {
         }
     }
 
+    const fetchAnalytics = async () => {
+        setAnalyticsLoading(true)
+        try {
+            const res = await fetch(`${API}/analytics`)
+            const data: AnalyticsData = await res.json()
+            setAnalytics(data)
+        } catch {
+            // silently fail — backend may be warming up
+        } finally {
+            setAnalyticsLoading(false)
+        }
+    }
+
+    const sendFeedback = async (queryId: number, rating: 1 | -1) => {
+        setFeedbackGiven((prev) => new Set(prev).add(queryId))
+        try {
+            await fetch(`${API}/feedback`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query_id: queryId, rating }),
+            })
+        } catch {
+            // feedback is best-effort; don't surface errors to the user
+        }
+    }
+
     return (
         <div className="flex flex-col h-screen bg-background text-foreground">
             {/* Header */}
@@ -324,6 +381,16 @@ export default function App() {
                         }`}
                     >
                         Agent
+                    </button>
+                    <button
+                        onClick={() => { setTab('analytics'); fetchAnalytics() }}
+                        className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                            tab === 'analytics'
+                                ? 'bg-background text-foreground shadow-sm'
+                                : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                    >
+                        Analytics
                     </button>
                 </div>
             </header>
@@ -428,7 +495,7 @@ export default function App() {
                                 {messages.map((msg) => (
                                     <div
                                         key={msg.id}
-                                        className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                                        className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
                                     >
                                         <div
                                             className={[
@@ -453,6 +520,35 @@ export default function App() {
                                                 <span className="inline-block w-0.5 h-3.5 bg-foreground/70 ml-0.5 align-middle animate-pulse" />
                                             )}
                                         </div>
+                                        {/* feedback buttons — only on completed assistant messages with a queryId */}
+                                        {msg.role === 'assistant' && msg.queryId && !msg.streaming && (
+                                            <div className="flex gap-1 mt-1 ml-1">
+                                                {feedbackGiven.has(msg.queryId) ? (
+                                                    <span className="text-[10px] text-muted-foreground/50">Thanks for the feedback</span>
+                                                ) : (
+                                                    <>
+                                                        <button
+                                                            onClick={() => sendFeedback(msg.queryId!, 1)}
+                                                            className="text-muted-foreground/40 hover:text-green-500 transition-colors p-1 rounded"
+                                                            title="Helpful"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M6.633 10.5c.806 0 1.533-.446 2.031-1.08a9.041 9.041 0 012.861-2.4c.723-.384 1.35-.956 1.653-1.715a4.498 4.498 0 00.322-1.672V3a.75.75 0 01.75-.75A2.25 2.25 0 0116.5 4.5c0 1.152-.26 2.243-.723 3.218-.266.558.107 1.282.725 1.282h3.126c1.026 0 1.945.694 2.054 1.715.045.422.068.85.068 1.285a11.95 11.95 0 01-2.649 7.521c-.388.482-.987.729-1.605.729H13.48c-.483 0-.964-.078-1.423-.23l-3.114-1.04a4.501 4.501 0 00-1.423-.23H5.904M14.25 9h2.25M5.904 18.75c.083.205.173.405.27.602.197.4-.078.898-.523.898h-.908c-.889 0-1.713-.518-1.972-1.368a12 12 0 01-.521-3.507c0-1.553.295-3.036.831-4.398C3.387 10.203 4.167 9.75 5 9.75h1.053c.472 0 .745.556.5.96a8.958 8.958 0 00-1.302 4.665c0 1.194.232 2.333.654 3.375z" />
+                                                            </svg>
+                                                        </button>
+                                                        <button
+                                                            onClick={() => sendFeedback(msg.queryId!, -1)}
+                                                            className="text-muted-foreground/40 hover:text-red-500 transition-colors p-1 rounded"
+                                                            title="Not helpful"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 15h2.25m8.024-9.75c.011.05.028.1.052.148.591 1.2.924 2.55.924 3.977a8.96 8.96 0 01-.999 4.125m.023-8.25c-.076-.365.183-.75.575-.75h.908c.889 0 1.713.518 1.972 1.368.339 1.11.521 2.287.521 3.507 0 1.553-.295 3.036-.831 4.398C20.613 14.547 19.833 15 19 15h-1.053c-.472 0-.745-.556-.5-.96a8.95 8.95 0 00.303-.54m.023-8.25H16.48a4.5 4.5 0 01-1.423-.23l-3.114-1.04a4.5 4.5 0 00-1.423-.23H6.504c-.618 0-1.217.247-1.605.729A11.95 11.95 0 002.25 12c0 .434.023.863.068 1.285C2.427 14.306 3.346 15 4.372 15h3.126c.618 0 .991.724.725 1.282A7.471 7.471 0 007.5 19.5a2.25 2.25 0 002.25 2.25.75.75 0 00.75-.75v-.633c0-.573.11-1.14.322-1.672.304-.76.93-1.33 1.653-1.715a9.04 9.04 0 002.86-2.4c.498-.634 1.226-1.08 2.032-1.08h.384" />
+                                                            </svg>
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 ))}
                                 <div ref={messagesEndRef} />
@@ -497,6 +593,101 @@ export default function App() {
                                 </p>
                             </div>
                         </>
+                    ) : tab === 'analytics' ? (
+                        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+                            {/* refresh button */}
+                            <div className="flex items-center justify-between">
+                                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                                    LLMOps Dashboard
+                                </p>
+                                <button
+                                    onClick={fetchAnalytics}
+                                    disabled={analyticsLoading}
+                                    className="text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+                                >
+                                    {analyticsLoading ? 'Loading...' : 'Refresh'}
+                                </button>
+                            </div>
+
+                            {analytics ? (
+                                <>
+                                    {/* Stat cards */}
+                                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                                        {[
+                                            { label: 'Total Queries', value: analytics.total_queries },
+                                            { label: 'Cache Hits', value: analytics.cache_hits },
+                                            { label: 'Cache Miss Rate', value: `${(analytics.cache_miss_rate * 100).toFixed(0)}%` },
+                                            { label: 'Avg Latency', value: `${analytics.avg_latency_ms} ms` },
+                                            { label: 'Total Tokens', value: analytics.total_tokens.toLocaleString() },
+                                            { label: '👍 Helpful', value: analytics.thumbs_up },
+                                            { label: '👎 Not Helpful', value: analytics.thumbs_down },
+                                        ].map((stat) => (
+                                            <div
+                                                key={stat.label}
+                                                className="rounded-lg border border-border bg-muted/20 px-4 py-3 space-y-1"
+                                            >
+                                                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                                                    {stat.label}
+                                                </p>
+                                                <p className="text-xl font-semibold tabular-nums">{stat.value}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Recent queries table */}
+                                    <div>
+                                        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
+                                            Recent Queries
+                                        </p>
+                                        {analytics.recent_queries.length === 0 ? (
+                                            <p className="text-xs text-muted-foreground">No queries yet.</p>
+                                        ) : (
+                                            <div className="rounded-lg border border-border overflow-hidden">
+                                                <table className="w-full text-xs">
+                                                    <thead>
+                                                        <tr className="border-b border-border bg-muted/30">
+                                                            <th className="text-left px-4 py-2 text-muted-foreground font-medium">Question</th>
+                                                            <th className="text-right px-4 py-2 text-muted-foreground font-medium whitespace-nowrap">Latency</th>
+                                                            <th className="text-right px-4 py-2 text-muted-foreground font-medium">Cache</th>
+                                                            <th className="text-right px-4 py-2 text-muted-foreground font-medium">Time</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {analytics.recent_queries.map((q, i) => (
+                                                            <tr
+                                                                key={i}
+                                                                className="border-b border-border last:border-0 hover:bg-muted/10 transition-colors"
+                                                            >
+                                                                <td className="px-4 py-2.5 max-w-[300px] truncate">{q.question}</td>
+                                                                <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">
+                                                                    {q.cache_hit ? '—' : `${q.latency_ms} ms`}
+                                                                </td>
+                                                                <td className="px-4 py-2.5 text-right">
+                                                                    {q.cache_hit ? (
+                                                                        <span className="text-green-500">HIT</span>
+                                                                    ) : (
+                                                                        <span className="text-muted-foreground/50">MISS</span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="px-4 py-2.5 text-right text-muted-foreground whitespace-nowrap">
+                                                                    {new Date(q.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="flex items-center justify-center h-40">
+                                    <p className="text-sm text-muted-foreground">
+                                        {analyticsLoading ? 'Loading...' : 'No data yet.'}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
                     ) : (
                         <>
                             {/* Agent execution tracker */}
