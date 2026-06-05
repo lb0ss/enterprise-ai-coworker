@@ -53,6 +53,7 @@ export default function App() {
     const [messages, setMessages] = useState<Message[]>([])
     const [question, setQuestion] = useState('')
     const [streaming, setStreaming] = useState(false)
+    const [lastQueryId, setLastQueryId] = useState<number | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
     // agent tab
@@ -164,6 +165,11 @@ export default function App() {
                     if (!line.startsWith('data: ')) continue // 'data: ' is SSE protocol format
                     const data = line.slice(6)
                     if (data === '[DONE]') break
+                    if (data.startsWith('[QUERY_ID:')) {
+                        const id = parseInt(data.slice(10, -1))
+                        setLastQueryId(id)
+                        continue
+                    }
                     setMessages((prev) =>
                         prev.map((m) =>
                             m.id === assistantMsg.id ? { ...m, content: m.content + data } : m

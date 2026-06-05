@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import uuid
 from typing import AsyncGenerator, Generator
 
@@ -17,9 +18,12 @@ from openai import OpenAI
 load_dotenv()
 
 from agent import get_agent
+from analytics import get_analytics, init_db, log_feedback, log_query
 from cache import get_cached_answer, set_cached_answer
 
 app = FastAPI(title="Enterprise AI Coworker")
+
+init_db()
 
 app.add_middleware(
     CORSMiddleware,
@@ -157,10 +161,16 @@ def chat(request: ChatRequest):
     question_vector = embed_texts([request.question])[0]
 
     # check Redis for a semantically similar cached answer before calling OpenAI
+    start_ms = int(time.time() * 1000)
+
     cached = get_cached_answer(question_vector)
     if cached:
+        latency_ms = int(time.time() * 1000) - start_ms
+        query_id = log_query(request.question, cached, latency_ms, 0, cache_hit=True)
+
         def stream_cached():
             yield f"data: {cached}\n\n"
+            yield f"data: [QUERY_ID:{query_id}]\n\n"
             yield "data: [DONE]\n\n"
         return StreamingResponse(stream_cached(), media_type="text/event-stream")
 
@@ -174,12 +184,16 @@ def chat(request: ChatRequest):
         full_answer = []
         for chunk in stream_answer(request.question, context_chunks, request.history):
             if chunk != "data: [DONE]\n\n":
-                # strip "data: " prefix and trailing "\n\n" to get the raw token
                 token = chunk[6:].rstrip("\n")
                 full_answer.append(token)
             yield chunk
-        # store the complete answer in Redis after streaming finishes
-        set_cached_answer(question_vector, "".join(full_answer))
+
+        answer = "".join(full_answer)
+        latency_ms = int(time.time() * 1000) - start_ms
+        set_cached_answer(question_vector, answer)
+        query_id = log_query(request.question, answer, latency_ms, 0, cache_hit=False)
+        yield f"data: [QUERY_ID:{query_id}]\n\n"
+        yield "data: [DONE]\n\n"
 
     return StreamingResponse(stream_and_cache(), media_type="text/event-stream")
 
@@ -221,3 +235,21 @@ async def run_agent(request: AgentRequest):
         stream_agent_events(request.task),
         media_type="text/event-stream",
     )
+
+
+class FeedbackRequest(BaseModel):
+    query_id: int
+    rating: int  # 1 = thumbs up, -1 = thumbs down
+
+
+@app.post("/feedback")
+def feedback(request: FeedbackRequest):
+    if request.rating not in (1, -1):
+        raise HTTPException(status_code=400, detail="Rating must be 1 or -1")
+    log_feedback(request.query_id, request.rating)
+    return {"status": "ok"}
+
+
+@app.get("/analytics")
+def analytics():
+    return get_analytics()
