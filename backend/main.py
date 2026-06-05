@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import uuid
 from typing import AsyncGenerator, Generator
 
@@ -8,6 +9,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, ToolMessage
+from langsmith import traceable
 from pydantic import BaseModel
 
 import chromadb
@@ -16,8 +18,12 @@ from openai import OpenAI
 load_dotenv()
 
 from agent import get_agent
+from analytics import get_analytics, init_db, log_feedback, log_query
+from cache import get_cached_answer, set_cached_answer
 
 app = FastAPI(title="Enterprise AI Coworker")
+
+init_db()
 
 app.add_middleware(
     CORSMiddleware,
@@ -64,6 +70,23 @@ def debug_chunks():
     return collection.get()
 
 
+@app.get("/documents")
+def get_documents():
+    results = collection.get(include=["metadatas"])
+    metadatas = results.get("metadatas", [])
+
+    # aggregate chunk counts per filename
+    counts: dict[str, int] = {}
+    for m in metadatas:
+        filename = m.get("filename", "unknown")
+        counts[filename] = counts.get(filename, 0) + 1
+
+    return {
+        "documents": [{"filename": f, "chunks_indexed": c} for f, c in counts.items()],
+        "total_chunks": len(metadatas),
+    }
+
+
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
     if not file.filename.endswith((".txt", ".md", ".py", ".pdf")):
@@ -104,6 +127,7 @@ class ChatRequest(BaseModel):
     n_results: int = 5
 
 
+@traceable(name="chat", run_type="chain")
 def stream_answer(question: str, context_chunks: list[str], history: list[ChatMessage]) -> Generator:
     context = "\n\n".join(context_chunks)
     system_prompt = f"""You are a helpful assistant that answers questions based on the provided document context.
@@ -136,16 +160,42 @@ def chat(request: ChatRequest):
     # embed_texts returns a list of vectors (one per input); [0] unwraps the single question vector
     question_vector = embed_texts([request.question])[0]
 
+    # check Redis for a semantically similar cached answer before calling OpenAI
+    start_ms = int(time.time() * 1000)
+
+    cached = get_cached_answer(question_vector)
+    if cached:
+        latency_ms = int(time.time() * 1000) - start_ms
+        query_id = log_query(request.question, cached, latency_ms, 0, cache_hit=True)
+
+        def stream_cached():
+            yield f"data: {cached}\n\n"
+            yield f"data: [QUERY_ID:{query_id}]\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(stream_cached(), media_type="text/event-stream")
+
     results = collection.query(
         query_embeddings=[question_vector],
         n_results=min(request.n_results, collection.count()),
     )
     context_chunks = results["documents"][0]
 
-    return StreamingResponse(
-        stream_answer(request.question, context_chunks, request.history),
-        media_type="text/event-stream",
-    )
+    def stream_and_cache():
+        full_answer = []
+        for chunk in stream_answer(request.question, context_chunks, request.history):
+            if chunk != "data: [DONE]\n\n":
+                token = chunk[6:].rstrip("\n")
+                full_answer.append(token)
+            yield chunk
+
+        answer = "".join(full_answer)
+        latency_ms = int(time.time() * 1000) - start_ms
+        set_cached_answer(question_vector, answer)
+        query_id = log_query(request.question, answer, latency_ms, 0, cache_hit=False)
+        yield f"data: [QUERY_ID:{query_id}]\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(stream_and_cache(), media_type="text/event-stream")
 
 
 class AgentRequest(BaseModel):
@@ -185,3 +235,21 @@ async def run_agent(request: AgentRequest):
         stream_agent_events(request.task),
         media_type="text/event-stream",
     )
+
+
+class FeedbackRequest(BaseModel):
+    query_id: int
+    rating: int  # 1 = thumbs up, -1 = thumbs down
+
+
+@app.post("/feedback")
+def feedback(request: FeedbackRequest):
+    if request.rating not in (1, -1):
+        raise HTTPException(status_code=400, detail="Rating must be 1 or -1")
+    log_feedback(request.query_id, request.rating)
+    return {"status": "ok"}
+
+
+@app.get("/analytics")
+def analytics():
+    return get_analytics()
