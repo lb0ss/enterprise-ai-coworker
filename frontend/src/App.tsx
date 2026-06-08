@@ -353,7 +353,7 @@ export default function App() {
     return (
         <div className="flex flex-col h-screen bg-background text-foreground">
             {/* Header */}
-            <header className="shrink-0 border-b border-border px-6 h-12 flex items-center gap-3">
+            <header className="shrink-0 border-b border-border/50 px-6 h-12 flex items-center gap-3">
                 <div
                     className={`w-1.5 h-1.5 rounded-full ${backendUp ? 'bg-green-500' : 'bg-red-500'}`}
                     title={backendUp ? 'Backend online' : 'Backend offline'}
@@ -398,7 +398,7 @@ export default function App() {
             {/* Body */}
             <div className="flex flex-1 overflow-hidden">
                 {/* LEFT: Upload panel */}
-                <aside className="w-72 shrink-0 border-r border-border flex flex-col p-5 gap-5">
+                <aside className="w-64 shrink-0 border-r border-border/50 bg-muted/25 flex flex-col p-4 gap-4">
                     <div>
                         <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
                             Document
@@ -407,11 +407,11 @@ export default function App() {
                         <div
                             {...getRootProps()}
                             className={[
-                                'border-2 border-dashed rounded-lg p-6 cursor-pointer transition-colors',
-                                'flex flex-col items-center justify-center gap-2 text-center min-h-[140px]',
+                                'border border-dashed rounded-xl p-5 cursor-pointer transition-colors',
+                                'flex flex-col items-center justify-center gap-2 text-center min-h-[120px]',
                                 isDragActive
                                     ? 'border-[var(--accent-border)] bg-[var(--accent-bg)]'
-                                    : 'border-border hover:border-muted-foreground hover:bg-muted/20',
+                                    : 'border-border/70 hover:border-border hover:bg-muted/30',
                                 uploading ? 'opacity-50 pointer-events-none' : '',
                             ].join(' ')}
                         >
@@ -456,7 +456,7 @@ export default function App() {
                     {indexedDocuments.length > 0 && (
                         <div className="space-y-1.5">
                             {indexedDocuments.map((doc) => (
-                                <div key={doc.filename} className="rounded-lg border border-border bg-muted/20 p-3 space-y-1">
+                                <div key={doc.filename} className="rounded-lg bg-muted/50 px-3 py-2.5 space-y-0.5">
                                     <div className="flex items-center gap-2">
                                         <div className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
                                         <span className="text-xs font-medium truncate">{doc.filename}</span>
@@ -479,15 +479,15 @@ export default function App() {
                     {tab === 'chat' ? (
                         <>
                             {/* Chat messages */}
-                            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+                            <div className="flex-1 overflow-y-auto px-8 py-8 space-y-6">
                                 {messages.length === 0 && (
                                     <div className="h-full flex items-center justify-center">
-                                        <div className="text-center space-y-1.5">
-                                            <p className="text-sm text-muted-foreground">
-                                                Upload a document, then ask a question.
+                                        <div className="text-center space-y-3">
+                                            <p className="text-2xl font-medium tracking-tight text-foreground/80">
+                                                What would you like to know?
                                             </p>
-                                            <p className="text-xs text-muted-foreground/50">
-                                                Answers are grounded in your document.
+                                            <p className="text-sm text-muted-foreground">
+                                                Upload a document, then ask anything about it.
                                             </p>
                                         </div>
                                     </div>
@@ -499,10 +499,10 @@ export default function App() {
                                     >
                                         <div
                                             className={[
-                                                'max-w-[75%] rounded-xl px-4 py-2.5 text-sm leading-relaxed',
+                                                'text-sm leading-7',
                                                 msg.role === 'user'
-                                                    ? 'bg-primary text-primary-foreground'
-                                                    : 'bg-muted text-foreground border border-border prose prose-sm max-w-none',
+                                                    ? 'max-w-[70%] bg-muted rounded-3xl px-5 py-3 text-foreground'
+                                                    : 'max-w-[85%] text-foreground prose prose-sm',
                                             ].join(' ')}
                                         >
                                             {msg.role === 'assistant'
@@ -554,9 +554,9 @@ export default function App() {
                                 <div ref={messagesEndRef} />
                             </div>
 
-                            {/* Chat input */}
-                            <div className="shrink-0 border-t border-border p-4">
-                                <div className="flex gap-2 items-end">
+                            {/* Chat input — pill-shaped floating bar */}
+                            <div className="shrink-0 px-6 pb-5 pt-2">
+                                <div className="flex items-end gap-3 rounded-full border border-border/70 bg-background shadow-[0_2px_16px_rgba(0,0,0,0.06)] px-5 py-3">
                                     <textarea
                                         value={question}
                                         onChange={(e) => setQuestion(e.target.value)}
@@ -568,27 +568,26 @@ export default function App() {
                                         }
                                         disabled={!uploadResult || streaming}
                                         rows={1}
-                                        className="flex-1 resize-none rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm
-                                            placeholder:text-muted-foreground focus:outline-none focus:border-muted-foreground
-                                            disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                        className="flex-1 resize-none bg-transparent text-sm placeholder:text-muted-foreground/60
+                                            focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
                                         style={{ lineHeight: '1.5rem', maxHeight: '8rem', overflowY: 'auto' }}
                                     />
                                     <button
                                         onClick={sendMessage}
                                         disabled={!question.trim() || streaming || !uploadResult}
-                                        className="size-9 rounded-lg bg-primary text-primary-foreground flex items-center justify-center
-                                            shrink-0 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-primary/80 transition-colors"
+                                        className="size-8 rounded-full bg-foreground text-background flex items-center justify-center
+                                            shrink-0 disabled:opacity-20 disabled:cursor-not-allowed hover:opacity-80 transition-opacity"
                                     >
                                         {streaming ? (
-                                            <div className="w-3.5 h-3.5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                                            <div className="w-3 h-3 border-2 border-background/30 border-t-background rounded-full animate-spin" />
                                         ) : (
-                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5 12 3m0 0 7.5 7.5M12 3v18" />
                                             </svg>
                                         )}
                                     </button>
                                 </div>
-                                <p className="text-[10px] text-muted-foreground/40 mt-2 text-right">
+                                <p className="text-[10px] text-center text-muted-foreground/30 mt-2">
                                     Enter to send · Shift+Enter for new line
                                 </p>
                             </div>
