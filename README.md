@@ -67,7 +67,13 @@ LangSmith traces every /chat and /agent call end-to-end
 ## Running locally
 
 ### Prerequisites
-- Python 3.11+, Node 20+, Redis running on port 6379
+- Python 3.11+, Node 20.19+ (or 22.12+), Redis
+
+### Redis
+```bash
+redis-server          # starts Redis on port 6379, run in its own terminal/tab
+redis-cli ping        # should print PONG once it's up
+```
 
 ### Backend
 ```bash
@@ -75,6 +81,7 @@ cd backend
 uv sync
 uv run uvicorn main:app --reload --port 8001
 ```
+If port 8001 is already taken by another local service, run on a different port (e.g. `--port 8002`) and update the `API` constant in `frontend/src/App.tsx` to match.
 
 `backend/.env` requires:
 ```
@@ -91,6 +98,14 @@ cd frontend
 npm install
 npm run dev -- --port 5173
 ```
+
+> **Apple Silicon note:** Vite's bundled `rolldown` dependency needs a native binary matching both your Node version (20.19+/22.12+) and CPU architecture (arm64). If your terminal shell is running under Rosetta (check with `arch` — it should print `arm64`, not `i386`/`x86_64`), `npm install` will silently fetch the wrong native binary and `npm run dev` will fail with "Cannot find native binding". Fix by running the install and dev server from a native arm64 shell:
+> ```bash
+> arch -arm64 zsh -ic 'nvm use 20.19  # or any 20.19+/22.12+ version
+>   npm install
+>   npm run dev -- --port 5173'
+> ```
+> Not every machine needs this — only required if your shell defaults to Rosetta.
 
 ---
 
