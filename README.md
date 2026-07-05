@@ -112,3 +112,8 @@ npm run dev -- --port 5173
 ## Key concepts
 
 **RAG** · **ReAct** · **MCP** · **LangGraph** · **LangSmith** · **Semantic caching** · **SSE streaming** · **Vector embeddings** · **Agentic workflows** · **LLMOps**
+
+<img width="1207" height="1159" alt="Screenshot 2026-07-04 at 7 56 33 PM" src="https://github.com/user-attachments/assets/b927bf38-aac1-4cc9-8fb4-20e974ef5ba4" />
+<img width="1202" height="1164" alt="Screenshot 2026-07-04 at 7 56 51 PM" src="https://github.com/user-attachments/assets/ff08fd8b-8663-4019-a953-98d9d6ef93ee" />
+<img width="1195" height="1163" alt="Screenshot 2026-07-04 at 7 56 59 PM" src="https://github.com/user-attachments/assets/bed89651-035e-4a95-ae84-d515d6568848" />
+
